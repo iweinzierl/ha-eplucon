@@ -21,13 +21,20 @@ class EpluconDevice:
             device: DeviceDTO,
     ) -> None:
         _LOGGER.info(
-            f"Init EpluconDevice with id '{device.id}'"
+            f"Initializing EpluconDevice: {device.name} with ID '{device.id}', type '{device.type}'"
         )
         self.device_registry = dr.async_get(hass)
+        
+        device_identifiers = (DOMAIN, f"Eplucon {device.id}")
+        _LOGGER.debug(f"Creating device with identifiers: {device_identifiers}")
+        
         self.device = self.device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             name=f"Eplucon {device.name}",
             model=f"{device.type}",
             manufacturer=MANUFACTURER,
-            identifiers={(DOMAIN, f"Eplucon {device.id}")}
+            identifiers={device_identifiers}
         )
+        
+        _LOGGER.info(f"Successfully created/retrieved device: {self.device.name} (registry ID: {self.device.id})")
+        _LOGGER.debug(f"Device details - Name: {self.device.name}, Model: {self.device.model}, Manufacturer: {self.device.manufacturer}")

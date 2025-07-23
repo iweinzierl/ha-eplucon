@@ -433,42 +433,39 @@ def get_friendly_operation_mode_text(device: DeviceDTO) -> str:
     # TODO: Consider adding localization options for the operation mode text, now hardcoded Dutch.
     try:
         operation_mode = int(device.realtime_info.common.operation_mode)
-    except TypeError:
-        _LOGGER.debug(f"Operation mode is not available for device {device.id}")
+        _LOGGER.debug(f"Converting operation mode {operation_mode} for device {device.id}")
+    except (TypeError, ValueError) as e:
+        _LOGGER.warning(f"Operation mode is not available or invalid for device {device.id}: {e}")
         return "Unavailable"
 
-    match operation_mode:
-        case 1:
-            return "Koeling"
-        case 2:
-            return "Verwarming"
-        case 3:
-            return "Auto th-TOUCH"
-        case 4:
-            return "Auto Wp"
-        case 5:
-            return "Haard"
-        case _:
-            return "Unknown operation mode"
+    mode_text = {
+        1: "Koeling",
+        2: "Verwarming", 
+        3: "Auto th-TOUCH",
+        4: "Auto Wp",
+        5: "Haard"
+    }.get(operation_mode, "Unknown operation mode")
+    
+    _LOGGER.debug(f"Operation mode {operation_mode} converted to '{mode_text}' for device {device.id}")
+    return mode_text
 
 def get_friendly_heating_mode_text(device: DeviceDTO) -> str:
     try:
         heating_mode = int(device.realtime_info.common.heating_mode)
-    except TypeError:
-        _LOGGER.debug(f"Heating mode is not available for device {device.id}")
+        _LOGGER.debug(f"Converting heating mode {heating_mode} for device {device.id}")
+    except (TypeError, ValueError) as e:
+        _LOGGER.warning(f"Heating mode is not available or invalid for device {device.id}: {e}")
         return "Unavailable"
 
-    match heating_mode:
-        case 0:
-            return "Off"
-        case 1:
-            return "On"
-        case 2:
-            return "Emergency operation"
-        case 3:
-            return "APX"
-        case _:
-            return "Unknown operation mode"
+    mode_text = {
+        0: "Off",
+        1: "On",
+        2: "Emergency operation",
+        3: "APX"
+    }.get(heating_mode, "Unknown heating mode")
+    
+    _LOGGER.debug(f"Heating mode {heating_mode} converted to '{mode_text}' for device {device.id}")
+    return mode_text
 
 async def async_setup_entry(
         hass: HomeAssistant,
@@ -476,26 +473,46 @@ async def async_setup_entry(
         async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Eplucon sensor based on a config entry."""
+    _LOGGER.info(f"Setting up Eplucon sensors for entry: {entry.entry_id}")
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
     # Ensure the coordinator has refreshed its data
+    _LOGGER.debug("Ensuring coordinator has fresh data")
     await coordinator.async_config_entry_first_refresh()
 
     devices = coordinator.data
+    _LOGGER.info(f"Processing {len(devices)} devices for sensor creation")
 
     list_device_dto: list[DeviceDTO] = list()
 
-    for device in devices:
+    for i, device in enumerate(devices):
+        _LOGGER.debug(f"Processing device {i+1}/{len(devices)}: {device}")
         if isinstance(device, dict):
             device = from_dict(data_class=DeviceDTO, data=device)
+            _LOGGER.debug(f"Converted dict to DeviceDTO: {device.name} (ID: {device.id})")
         list_device_dto.append(device)
 
-    async_add_entities(
-        EpluconSensorEntity(coordinator, device, description)
-        for device in list_device_dto
-        for description in SENSORS
-        if description.exists_fn(device)
-    )
+    # Create sensors for each device
+    sensors_to_add = []
+    total_sensors = 0
+    
+    for device in list_device_dto:
+        device_sensors = []
+        for description in SENSORS:
+            if description.exists_fn(device):
+                sensor = EpluconSensorEntity(coordinator, device, description)
+                device_sensors.append(sensor)
+                sensors_to_add.append(sensor)
+                _LOGGER.debug(f"Created sensor: {description.name} for device {device.name}")
+            else:
+                _LOGGER.debug(f"Skipping sensor {description.name} for device {device.name} - existence check failed")
+        
+        _LOGGER.info(f"Created {len(device_sensors)} sensors for device {device.name} (ID: {device.id})")
+        total_sensors += len(device_sensors)
+
+    _LOGGER.info(f"Adding {total_sensors} sensors to Home Assistant")
+    async_add_entities(sensors_to_add)
+    _LOGGER.info("Eplucon sensor setup completed successfully")
 
 
 class EpluconSensorEntity(CoordinatorEntity, SensorEntity):
@@ -512,32 +529,72 @@ class EpluconSensorEntity(CoordinatorEntity, SensorEntity):
         self.entity_description = entity_description
         self._attr_name = f"{entity_description.name}"
         self._attr_unique_id = f"{device.id}_{entity_description.key}"
+        _LOGGER.debug(f"Initializing sensor: {self._attr_name} (unique_id: {self._attr_unique_id}) for device {device.name}")
         self._update_device_data()
+        _LOGGER.debug(f"Sensor initialized successfully: {self._attr_name}")
 
     @property
     def device_info(self) -> dict:
         """Return information to link this entity with the correct device."""
-        return {
+        device_info = {
             "manufacturer": MANUFACTURER,
             "identifiers": {(DOMAIN, self.device.account_module_index)},
         }
+        _LOGGER.debug(f"Device info for sensor {self._attr_name}: {device_info}")
+        return device_info
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        available = super().available and self.coordinator.last_update_success
+        if not available:
+            _LOGGER.warning(f"Sensor {self._attr_name} is unavailable - coordinator success: {self.coordinator.last_update_success}")
+        return available
 
     def _update_device_data(self):
         """Update the internal data from the coordinator."""
+        _LOGGER.debug(f"Updating device data for sensor {self._attr_name}")
         # Assuming devices are updated in the coordinator data
+        updated = False
         for updated_device in self.coordinator.data:
             if isinstance(updated_device, dict):
                 updated_device = from_dict(data_class=DeviceDTO, data=updated_device)
             if updated_device.id == self.device.id:
+                old_device_name = self.device.name
                 self.device = updated_device
+                _LOGGER.debug(f"Updated device data for sensor {self._attr_name}: {old_device_name} -> {updated_device.name}")
+                updated = True
+                break
+        
+        if not updated:
+            _LOGGER.warning(f"Could not find updated device data for sensor {self._attr_name} (device ID: {self.device.id})")
 
     @property
     def native_value(self) -> StateType:
         """Return the state of the sensor."""
-        return self.entity_description.value_fn(self.device)
+        try:
+            value = self.entity_description.value_fn(self.device)
+            _LOGGER.debug(f"Sensor {self._attr_name} value: {value}")
+            return value
+        except Exception as e:
+            _LOGGER.error(f"Error getting value for sensor {self._attr_name}: {type(e).__name__}: {e}")
+            return None
 
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        _LOGGER.debug(f"Getting update from coordinator in sensor {self.name}.")
-        self._update_device_data()
-        super()._handle_coordinator_update()
+        _LOGGER.debug(f"Coordinator update received for sensor {self._attr_name}")
+        try:
+            self._update_device_data()
+            old_value = getattr(self, '_last_value', None)
+            new_value = self.native_value
+            
+            if old_value != new_value:
+                _LOGGER.debug(f"Sensor {self._attr_name} value changed: {old_value} -> {new_value}")
+            else:
+                _LOGGER.debug(f"Sensor {self._attr_name} value unchanged: {new_value}")
+            
+            self._last_value = new_value
+            super()._handle_coordinator_update()
+            _LOGGER.debug(f"Coordinator update completed for sensor {self._attr_name}")
+        except Exception as e:
+            _LOGGER.error(f"Error handling coordinator update for sensor {self._attr_name}: {type(e).__name__}: {e}")
