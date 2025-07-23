@@ -45,6 +45,17 @@ class EpluconDebugClient:
             "Authorization": f"Bearer {api_token}"
         }
         
+    def _sanitize_headers_for_logging(self, headers: dict) -> dict:
+        """Sanitize headers for logging by masking sensitive information."""
+        sanitized = headers.copy()
+        if 'Authorization' in sanitized:
+            auth_value = sanitized['Authorization']
+            if auth_value.startswith('Bearer '):
+                token = auth_value[7:]  # Remove 'Bearer ' prefix
+                masked_token = token[:8] + '*' * (len(token) - 12) + token[-4:] if len(token) > 12 else '*' * len(token)
+                sanitized['Authorization'] = f'Bearer {masked_token}'
+        return sanitized
+        
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
         return self
@@ -64,6 +75,7 @@ class EpluconDebugClient:
         try:
             url = f"{self.base_url}/econtrol/modules"
             logger.info(f"Testing connection to: {url}")
+            logger.debug(f"Request headers: {self._sanitize_headers_for_logging(self.headers)}")
             
             async with self.session.get(url, headers=self.headers) as response:
                 logger.info(f"Response Status: {response.status}")
@@ -100,9 +112,11 @@ class EpluconDebugClient:
         try:
             url = f"{self.base_url}/econtrol/modules/{device_id}/get_realtime_info"
             logger.info(f"Fetching realtime info: {url}")
+            logger.debug(f"Request headers: {self._sanitize_headers_for_logging(self.headers)}")
             
             async with self.session.get(url, headers=self.headers) as response:
                 logger.info(f"Realtime Info Response Status: {response.status}")
+                logger.debug(f"Response Headers: {dict(response.headers)}")
                 
                 if response.status == 200:
                     data = await response.json()
@@ -130,9 +144,11 @@ class EpluconDebugClient:
         try:
             url = f"{self.base_url}/econtrol/modules/{device_id}/heatloading_status"
             logger.info(f"Fetching heatloading status: {url}")
+            logger.debug(f"Request headers: {self._sanitize_headers_for_logging(self.headers)}")
             
             async with self.session.get(url, headers=self.headers) as response:
                 logger.info(f"Heatloading Status Response Status: {response.status}")
+                logger.debug(f"Response Headers: {dict(response.headers)}")
                 
                 if response.status == 200:
                     data = await response.json()

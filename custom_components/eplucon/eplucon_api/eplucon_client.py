@@ -34,13 +34,28 @@ class EpluconApi:
         }
 
         _LOGGER.debug("Initialize Eplucon API client")
+        _LOGGER.debug(f"API endpoint: {self._base}")
+        _LOGGER.debug(f"Headers configured: {self._sanitize_headers_for_logging(self._headers)}")
+
+    def _sanitize_headers_for_logging(self, headers: dict) -> dict:
+        """Sanitize headers for logging by masking sensitive information."""
+        sanitized = headers.copy()
+        if 'Authorization' in sanitized:
+            auth_value = sanitized['Authorization']
+            if auth_value.startswith('Bearer '):
+                token = auth_value[7:]  # Remove 'Bearer ' prefix
+                masked_token = token[:8] + '*' * (len(token) - 12) + token[-4:] if len(token) > 12 else '*' * len(token)
+                sanitized['Authorization'] = f'Bearer {masked_token}'
+        return sanitized
 
     async def get_devices(self) -> list[DeviceDTO]:
         url = f"{self._base}/econtrol/modules"
         _LOGGER.debug(f"Eplucon Get devices {url}")
+        _LOGGER.debug(f"Request headers: {self._sanitize_headers_for_logging(self._headers)}")
         try:
             async with self._session.get(url, headers=self._headers) as response:
                 _LOGGER.debug(f"API response status: {response.status} for get_devices")
+                _LOGGER.debug(f"Response headers: {dict(response.headers)}")
                 if response.status != 200:
                     _LOGGER.error(f"API returned non-200 status: {response.status} for get_devices")
                     raise ApiError(f"API returned status {response.status}")
@@ -60,10 +75,12 @@ class EpluconApi:
     async def get_realtime_info(self, module_id: int) -> RealtimeInfoDTO:
         url = f"{self._base}/econtrol/modules/{module_id}/get_realtime_info"
         _LOGGER.debug(f"Eplucon Get realtime info for {module_id}: {url}")
+        _LOGGER.debug(f"Request headers: {self._sanitize_headers_for_logging(self._headers)}")
 
         try:
             async with self._session.get(url, headers=self._headers) as response:
                 _LOGGER.debug(f"API response status: {response.status} for get_realtime_info module {module_id}")
+                _LOGGER.debug(f"Response headers: {dict(response.headers)}")
                 if response.status != 200:
                     _LOGGER.error(f"API returned non-200 status: {response.status} for get_realtime_info module {module_id}")
                     raise ApiError(f"API returned status {response.status}")
@@ -87,10 +104,12 @@ class EpluconApi:
     async def get_heatpump_heatloading_status(self, module_id: int) -> dict:
         url = f"{self._base}/econtrol/modules/{module_id}/heatloading_status"
         _LOGGER.debug(f"Eplucon Get heatpump heatloading status for {module_id}: {url}")
+        _LOGGER.debug(f"Request headers: {self._sanitize_headers_for_logging(self._headers)}")
 
         try:
             async with self._session.get(url, headers=self._headers) as response:
                 _LOGGER.debug(f"API response status: {response.status} for get_heatpump_heatloading_status module {module_id}")
+                _LOGGER.debug(f"Response headers: {dict(response.headers)}")
                 if response.status != 200:
                     _LOGGER.error(f"API returned non-200 status: {response.status} for get_heatpump_heatloading_status module {module_id}")
                     raise ApiError(f"API returned status {response.status}")
