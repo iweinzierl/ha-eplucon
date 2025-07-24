@@ -35,10 +35,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def async_update_data() -> list[DeviceDTO]:
         """Fetch Eplucon data from API endpoint."""
         _LOGGER.debug("Starting coordinator data update cycle")
+        start_time = __import__('time').time()
+        
         try:
-            entry_devices = entry.data["devices"]
+            # Make a deep copy of the devices to avoid modifying the entry data
+            entry_devices = []
+            for device in entry.data["devices"]:
+                if isinstance(device, dict):
+                    device_copy = device.copy()
+                    entry_devices.append(device_copy)
+                else:
+                    # Create a new DTO object to avoid modifying the original
+                    entry_devices.append(from_dict(data_class=DeviceDTO, data=device.__dict__))
+            
             _LOGGER.info(f"Fetching data from Eplucon API for {len(entry_devices)} devices")
 
+            devices_to_remove = []
             # For each device, fetch the real-time info and combine it with the device data
             for i, entry_device in enumerate(entry_devices):
                 _LOGGER.debug(f"Processing device {i+1}/{len(entry_devices)}: {entry_device}")
@@ -49,11 +61,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 # Skip unsupported devices
                 if entry_device.type not in SUPPORTED_TYPES:
                     _LOGGER.warning(f"Device {entry_device.name} (ID: {entry_device.id}) with type {entry_device.type} is not supported yet. Skipping...")
-                    entry_devices.remove(entry_device)
+                    devices_to_remove.append(entry_device)
                     continue
 
                 _LOGGER.debug(f"Fetching realtime info for device {entry_device.id}")
                 realtime_info = await client.get_realtime_info(entry_device.id)
+                # Create a fresh copy to ensure we're not reusing old data
                 entry_device.realtime_info = realtime_info
 
                 _LOGGER.debug(f"Fetching heatloading status for device {entry_device.id}")
@@ -62,7 +75,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 
                 _LOGGER.info(f"Successfully updated data for device {entry_device.name} (ID: {entry_device.id})")
 
+            # Remove skipped devices outside the loop to avoid modifying the list during iteration
+            for device in devices_to_remove:
+                if device in entry_devices:
+                    entry_devices.remove(device)
+
+            elapsed_time = __import__('time').time() - start_time
             _LOGGER.info(f"Data update cycle completed successfully for {len(entry_devices)} devices")
+            _LOGGER.debug(f"Finished fetching Eplucon devices data in {elapsed_time:.3f} seconds (success: True)")
             return entry_devices
 
         except ApiError as err:

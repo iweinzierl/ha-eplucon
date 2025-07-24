@@ -558,10 +558,30 @@ class EpluconSensorEntity(CoordinatorEntity, SensorEntity):
         updated = False
         for updated_device in self.coordinator.data:
             if isinstance(updated_device, dict):
+                # Convert dictionary to DeviceDTO object
                 updated_device = from_dict(data_class=DeviceDTO, data=updated_device)
             if updated_device.id == self.device.id:
+                # Deep comparison of real-time data to detect changes
+                old_value = None
+                new_value = None
+                if hasattr(self.device, 'realtime_info') and self.device.realtime_info and self.device.realtime_info.common:
+                    try:
+                        old_value = self.entity_description.value_fn(self.device)
+                    except Exception:
+                        pass
+                
                 old_device_name = self.device.name
+                # Replace the entire device object with the updated one
                 self.device = updated_device
+                
+                if hasattr(self.device, 'realtime_info') and self.device.realtime_info and self.device.realtime_info.common:
+                    try:
+                        new_value = self.entity_description.value_fn(self.device)
+                        if old_value != new_value:
+                            _LOGGER.debug(f"Sensor {self._attr_name} detected value change in device update: {old_value} -> {new_value}")
+                    except Exception:
+                        pass
+                
                 _LOGGER.debug(f"Updated device data for sensor {self._attr_name}: {old_device_name} -> {updated_device.name}")
                 updated = True
                 break
@@ -584,7 +604,10 @@ class EpluconSensorEntity(CoordinatorEntity, SensorEntity):
         """Handle updated data from the coordinator."""
         _LOGGER.debug(f"Coordinator update received for sensor {self._attr_name}")
         try:
+            # Make sure we have the latest data from coordinator
             self._update_device_data()
+            
+            # Get the old and new values to detect changes
             old_value = getattr(self, '_last_value', None)
             new_value = self.native_value
             
@@ -593,8 +616,17 @@ class EpluconSensorEntity(CoordinatorEntity, SensorEntity):
             else:
                 _LOGGER.debug(f"Sensor {self._attr_name} value unchanged: {new_value}")
             
+            # Store the new value for future comparisons
             self._last_value = new_value
-            super()._handle_coordinator_update()
+            
+            # Always write the state to Home Assistant, even if unchanged
+            # This ensures the entity's timestamp gets updated in HA
+            self.async_write_ha_state()
+            
+            # We don't call super()._handle_coordinator_update() because we're handling 
+            # the state update ourselves above with async_write_ha_state().
+            # This prevents potential conflicts or double updates.
+            
             _LOGGER.debug(f"Coordinator update completed for sensor {self._attr_name}")
         except Exception as e:
-            _LOGGER.error(f"Error handling coordinator update for sensor {self._attr_name}: {type(e).__name__}: {e}")
+            _LOGGER.error(f"Error handling coordinator update for sensor {self._attr_name}: {type(e).__name__}: {e}", exc_info=True)

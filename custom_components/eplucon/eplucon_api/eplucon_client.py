@@ -88,13 +88,25 @@ class EpluconApi:
                 data = await response.json()
                 _LOGGER.debug(f"Raw realtime info response for module {module_id}: {data}")
                 self.validate_response(data)
-
+                
+                # Create a completely fresh object from the API data
+                # This ensures we don't have any old data lingering
                 common_info = CommonInfoDTO(**data['data']['common'])
                 _LOGGER.debug(f"Created CommonInfoDTO for module {module_id}: indoor_temp={common_info.indoor_temperature}, outdoor_temp={common_info.outdoor_temperature}")
                 heatpump_info = data['data']['heatpump']  # Not sure what this could be
                 _LOGGER.debug(f"Heatpump info for module {module_id}: {heatpump_info}")
+                
+                # Create a new DTO with the fresh data
                 realtime_info = RealtimeInfoDTO(common=common_info, heatpump=heatpump_info)
 
+                # Add debug info to compare with any previous values
+                # This will help diagnose if values are being updated correctly
+                _LOGGER.debug(f"Module {module_id} realtime data - " + 
+                             f"brine_in_temp: {common_info.brine_in_temperature}, " +
+                             f"brine_out_temp: {common_info.brine_out_temperature}, " +
+                             f"indoor_temp: {common_info.indoor_temperature}, " +
+                             f"outdoor_temp: {common_info.outdoor_temperature}")
+                
                 _LOGGER.info(f"Successfully retrieved realtime info for module {module_id}")
                 return realtime_info
         except Exception as e:
