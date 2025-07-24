@@ -554,50 +554,80 @@ class EpluconSensorEntity(CoordinatorEntity, SensorEntity):
     def _update_device_data(self):
         """Update the internal data from the coordinator."""
         _LOGGER.debug(f"Updating device data for sensor {self._attr_name}")
-        # Assuming devices are updated in the coordinator data
+        # Get value before update for comparison
+        old_value = None
+        try:
+            if hasattr(self.device, 'realtime_info') and self.device.realtime_info and self.device.realtime_info.common:
+                old_value = self.entity_description.value_fn(self.device)
+                _LOGGER.debug(f"Sensor {self._attr_name} current value before update: {old_value}")
+        except Exception as e:
+            _LOGGER.debug(f"Error getting old value for {self._attr_name}: {str(e)}")
+            
+        # Find the updated device in coordinator data
         updated = False
         for updated_device in self.coordinator.data:
             if isinstance(updated_device, dict):
                 # Convert dictionary to DeviceDTO object
-                updated_device = from_dict(data_class=DeviceDTO, data=updated_device)
+                try:
+                    updated_device = from_dict(data_class=DeviceDTO, data=updated_device)
+                except Exception as e:
+                    _LOGGER.error(f"Error converting device dict to DTO: {e}")
+                    continue
+                    
             if updated_device.id == self.device.id:
-                # Deep comparison of real-time data to detect changes
-                old_value = None
-                new_value = None
-                if hasattr(self.device, 'realtime_info') and self.device.realtime_info and self.device.realtime_info.common:
-                    try:
-                        old_value = self.entity_description.value_fn(self.device)
-                    except Exception:
-                        pass
-                
                 old_device_name = self.device.name
-                # Replace the entire device object with the updated one
+                
+                # Completely replace the device object
                 self.device = updated_device
-                
-                if hasattr(self.device, 'realtime_info') and self.device.realtime_info and self.device.realtime_info.common:
-                    try:
-                        new_value = self.entity_description.value_fn(self.device)
-                        if old_value != new_value:
-                            _LOGGER.debug(f"Sensor {self._attr_name} detected value change in device update: {old_value} -> {new_value}")
-                    except Exception:
-                        pass
-                
-                _LOGGER.debug(f"Updated device data for sensor {self._attr_name}: {old_device_name} -> {updated_device.name}")
                 updated = True
+                
+                # Log the update and check for value changes
+                _LOGGER.debug(f"Updated device object for sensor {self._attr_name}: {old_device_name} -> {updated_device.name}")
+                
+                # Get the new value and compare
+                try:
+                    new_value = self.entity_description.value_fn(self.device)
+                    _LOGGER.debug(f"Sensor {self._attr_name} new value after update: {new_value}")
+                    
+                    # Check if value changed
+                    if old_value != new_value:
+                        _LOGGER.debug(f"Sensor {self._attr_name} value CHANGED: {old_value} -> {new_value}")
+                    else:
+                        _LOGGER.debug(f"Sensor {self._attr_name} value unchanged: {new_value}")
+                        
+                except Exception as e:
+                    _LOGGER.error(f"Error getting new value for {self._attr_name}: {str(e)}", exc_info=True)
+                
                 break
         
         if not updated:
             _LOGGER.warning(f"Could not find updated device data for sensor {self._attr_name} (device ID: {self.device.id})")
+            _LOGGER.debug(f"Available device IDs in coordinator: {[d.id if not isinstance(d, dict) else d.get('id') for d in self.coordinator.data]}")
 
     @property
     def native_value(self) -> StateType:
         """Return the state of the sensor."""
         try:
+            if not hasattr(self.device, 'realtime_info') or not self.device.realtime_info:
+                _LOGGER.warning(f"Sensor {self._attr_name}: Device has no realtime_info")
+                return None
+                
             value = self.entity_description.value_fn(self.device)
             _LOGGER.debug(f"Sensor {self._attr_name} value: {value}")
+            
+            # For debugging, if this is a temperature sensor, log extra details
+            if "temperature" in self._attr_name.lower() and hasattr(self.device, 'realtime_info') and self.device.realtime_info and self.device.realtime_info.common:
+                common = self.device.realtime_info.common
+                temp_values = {
+                    attr: getattr(common, attr) 
+                    for attr in dir(common) 
+                    if "temperature" in attr and not attr.startswith("_") and hasattr(common, attr)
+                }
+                _LOGGER.debug(f"All temperature values for {self._attr_name}: {temp_values}")
+            
             return value
         except Exception as e:
-            _LOGGER.error(f"Error getting value for sensor {self._attr_name}: {type(e).__name__}: {e}")
+            _LOGGER.error(f"Error getting value for sensor {self._attr_name}: {type(e).__name__}: {e}", exc_info=True)
             return None
 
     def _handle_coordinator_update(self) -> None:
